@@ -10,36 +10,46 @@ const session = require('express-session');
 const nodemailer = require('nodemailer');
 const crypto = require('crypto');
 
-const SESSION_SECRET = require('./config/keys_dev').SESSION_SECRET;
+const SESSION_SECRET = require('./config').JWT_SECRET;
 const Users = require('./models/User');
-const db = require('./config/keys_dev').mongoURI;
-const EMAIL = require('./config/keys_dev').MAILER_EMAIL;
-const PASSWORD = require('./config/keys_dev').MAILER_PASSWORD;
+const db = require('./config').DB_CONNECTION_STRING;
+const EMAIL = require('./config').MAILER_EMAIL;
+const PASSWORD = require('./config').MAILER_PASSWORD;
+
+const AWS = require('aws-sdk')
 
 // Import Routers
-const PetsRouter = require('./routers/pets');
-const UsersRouter = require('./routers/Users');
-const OrdersRouter = require('./routers/Orders');
-const CartsRouter = require('./routers/Carts');
-const PaymentRouter = require('./routers/Payment');
+// const PetsRouter = require('./routers/pets');
+// const UsersRouter = require('./routers/Users');
+// const OrdersRouter = require('./routers/Orders');
+// const CartsRouter = require('./routers/Carts');
+// const PaymentRouter = require('./routers/Payment');
 
-const PORT = process.env.PORT || 5000;
 
-const server = express();
+const server = require('./graphql')
+const PORT = process.env.PORT || 5000
 
+AWS.config.update({
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+})
+
+const app = express()
 
 // Setup some middleware
-server.use(bodyParser.urlencoded({ extended: false }));
-server.use(bodyParser.json());
-server.use(cors({
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
+app.use(cors({
     origin: true,
     credentials: true,
 }));
-server.use(session({
+app.use(session({
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
 }));
+
+server.applyMiddleware({ app })
 
 // Reusable part for send email
 const transporter = nodemailer.createTransport({
@@ -51,15 +61,15 @@ const transporter = nodemailer.createTransport({
 });
 
 // Send email to reset password
-server.put('/forget_password', (req, res) => {
+app.put('/forget_password', (req, res) => {
     const email = req.body.email;
-    Users
+    User
         .findOne({email})
         .then(user => {
             if (user) {
                 // create a random token
                 const token = crypto.randomBytes(20).toString('hex');
-                return Users
+                return User
                     .findOneAndUpdate(
                         { email }, 
                         {
@@ -104,7 +114,7 @@ server.put('/forget_password', (req, res) => {
         .catch(err => console.log("Error when varify email of reseting pw: " + err));
 });
 
-server.get('/reset_password', (req, res) => {
+app.get('/reset_password', (req, res) => {
     const { token } = req.query;
     Users
         .findOne({
@@ -121,7 +131,7 @@ server.get('/reset_password', (req, res) => {
         .catch(err => console.log("Error when open reset_password link: " + err));   
 });
 
-server.put('/reset_password', (req, res) => {
+app.put('/reset_password', (req, res) => {
     const { token, newPW } = req.body;
 
     bcrypt.hash(newPW, 11, (err, hashedPW) => {
@@ -145,7 +155,7 @@ server.put('/reset_password', (req, res) => {
 });
 
 // Middleware: Validate user for all the routers, except '/signin' and '/singup'
-server.use((req, res, next) => {
+app.use((req, res, next) => {
     if (req.originalUrl === '/signin' || req.originalUrl === '/signup') return next();
     if (!req.session.email) {
         res.json({msg: "User is not logged in"});
@@ -155,7 +165,7 @@ server.use((req, res, next) => {
 });
 
 // Sign Up User
-server.post('/signup', (req, res) => {
+app.post('/signup', (req, res) => {
     bcrypt.hash(req.body.password, 11, (err, hashedPW) => {
         if (err) {
             res.status(422).json({"error": err});
@@ -171,7 +181,7 @@ server.post('/signup', (req, res) => {
 });
 
 // Sign In User
-server.post('/signin', (req, res) => {
+app.post('/signin', (req, res) => {
     const { email } = req.body;
     Users
         .findOne({ email })
@@ -195,31 +205,31 @@ server.post('/signin', (req, res) => {
 });
 
 // Sign Out User
-server.post('/signout', (req, res) => {
+app.post('/signout', (req, res) => {
     delete req.session.email;
     delete req.user;
     res.json({success: true, msg: "User Sign Out", session: req.session});
 });
 
 // Using Routers
-server.use('/pets', PetsRouter);
-server.use('/users', UsersRouter);
-server.use('/orders', OrdersRouter);
-server.use('/carts', CartsRouter);
-server.use('/payments', PaymentRouter);
+// server.use('/pets', PetsRouter);
+// server.use('/users', UsersRouter);
+// server.use('/orders', OrdersRouter);
+// server.use('/carts', CartsRouter);
+// server.use('/payments', PaymentRouter);
 
 
 // Charge customer with token
-server.post('/payment', (req, res) => {
-    return stripe.charges.create({
-        amount: req.body.amount,
-        currency: req.body.currency,
-        source: req.body.source,
-        description: req.body.description,
-    })
-    .then(result => res.status(200).json(result))
-    .catch(error => console.log(error));
-});
+// app.post('/payment', (req, res) => {
+//     return stripe.charges.create({
+//         amount: req.body.amount,
+//         currency: req.body.currency,
+//         source: req.body.source,
+//         description: req.body.description,
+//     })
+//     .then(result => res.status(200).json(result))
+//     .catch(error => console.log(error));
+// });
 
 
 // Connect to MongoDB
